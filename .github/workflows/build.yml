@@ -24,14 +24,21 @@ jobs:
           Copy-Item 'build/WreckingBallPlatform.dll' 'dist/staging/fh3-mods/WreckingBall.dll'
           Copy-Item 'Readme.txt' 'dist/staging/Readme.txt'
           $name = 'WreckingBall-FH3-Mod-Platform-1.0.0.zip'
+          $source = 'WreckingBall-FH3-Source-1.0.0.zip'
           Compress-Archive -LiteralPath 'dist/staging/fh3-mods','dist/staging/Readme.txt' -DestinationPath "dist/$name"
-          $hash = (Get-FileHash "dist/$name" -Algorithm SHA256).Hash.ToLowerInvariant()
-          Set-Content 'dist/SHA256SUMS.txt' "$hash  $name" -Encoding ascii
+          git archive --format=zip --prefix=WreckingBallFH3-1.0.0/ --output="dist/$source" HEAD
+          if ($LASTEXITCODE -ne 0) { throw 'Could not create the source archive.' }
+          $checksums = foreach ($asset in @($name, $source)) {
+            $hash = (Get-FileHash "dist/$asset" -Algorithm SHA256).Hash.ToLowerInvariant()
+            "$hash  $asset"
+          }
+          Set-Content 'dist/SHA256SUMS.txt' -Value (($checksums -join [char]10) + [char]10) -Encoding ascii -NoNewline
       - uses: actions/upload-artifact@v7.0.2
         with:
           name: WreckingBall-FH3-win-x64
           path: |
             dist/WreckingBall-FH3-Mod-Platform-1.0.0.zip
+            dist/WreckingBall-FH3-Source-1.0.0.zip
             dist/SHA256SUMS.txt
           if-no-files-found: error
 
@@ -51,17 +58,24 @@ jobs:
       - uses: actions/download-artifact@v8
         with:
           name: WreckingBall-FH3-win-x64
-      - name: Publish 1.0.0 or update the original release notes
+      - name: Publish the 1.0.0 release assets
+        shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          if current_notes=$(gh release view v1.0.0 --repo "$GITHUB_REPOSITORY" --json body --jq .body); then
-            original_notes='Forza Horizon 3 on Azimuth with FH3 Mod Platform. Extract the ZIP beside azimuth.exe.'
-            if [ "$current_notes" = "$original_notes" ]; then
-              gh release edit v1.0.0 --repo "$GITHUB_REPOSITORY" --notes-file RELEASE_NOTES.md
-            fi
+          assets=(WreckingBall-FH3-Source-1.0.0.zip WreckingBall-FH3-Mod-Platform-1.0.0.zip SHA256SUMS.txt)
+          sha256sum --check SHA256SUMS.txt
+          if gh release view v1.0.0 --repo "$GITHUB_REPOSITORY" --json body --jq .body > current-notes.md; then
+            if grep -Fq '## November 7 update' current-notes.md; then exit 0; fi
+            original_tag=c5eca07c0b50aac4663134f43f1c3a0876d726c2
+            current_tag=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/v1.0.0" --jq .object.sha)
+            if [ "$current_tag" != "$original_tag" ]; then exit 0; fi
+            gh release upload v1.0.0 "${assets[@]}" --repo "$GITHUB_REPOSITORY" --clobber
+            printf '\n' >> current-notes.md
+            sed -n '/^## November 7 update$/,$p' RELEASE_NOTES.md >> current-notes.md
+            gh release edit v1.0.0 --repo "$GITHUB_REPOSITORY" --notes-file current-notes.md
             exit 0
           fi
-          gh release create v1.0.0 WreckingBall-FH3-Mod-Platform-1.0.0.zip SHA256SUMS.txt \
+          gh release create v1.0.0 "${assets[@]}" \
             --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title 'WreckingBall FH3 1.0.0' \
             --notes-file RELEASE_NOTES.md
