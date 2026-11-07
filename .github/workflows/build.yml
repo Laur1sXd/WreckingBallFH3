@@ -1,0 +1,60 @@
+name: Windows x64 build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - name: Build and test
+        shell: cmd
+        run: call build.cmd test
+      - name: Package the Mod Platform build
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path 'dist/staging/fh3-mods' -Force | Out-Null
+          Copy-Item 'build/WreckingBallPlatform.dll' 'dist/staging/fh3-mods/WreckingBall.dll'
+          Copy-Item 'Readme.txt' 'dist/staging/Readme.txt'
+          $name = 'WreckingBall-FH3-Mod-Platform-1.0.0.zip'
+          Compress-Archive -LiteralPath 'dist/staging/fh3-mods','dist/staging/Readme.txt' -DestinationPath "dist/$name"
+          $hash = (Get-FileHash "dist/$name" -Algorithm SHA256).Hash.ToLowerInvariant()
+          Set-Content 'dist/SHA256SUMS.txt' "$hash  $name" -Encoding ascii
+      - uses: actions/upload-artifact@v7.0.2
+        with:
+          name: WreckingBall-FH3-win-x64
+          path: |
+            dist/WreckingBall-FH3-Mod-Platform-1.0.0.zip
+            dist/SHA256SUMS.txt
+          if-no-files-found: error
+
+  initial-release:
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && github.repository == 'Laur1sXd/WreckingBallFH3'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    concurrency:
+      group: wreckingball-release-v1.0.0
+      cancel-in-progress: false
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: WreckingBall-FH3-win-x64
+      - name: Publish 1.0.0 if absent
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view v1.0.0 --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            exit 0
+          fi
+          gh release create v1.0.0 WreckingBall-FH3-Mod-Platform-1.0.0.zip SHA256SUMS.txt \
+            --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title 'WreckingBall FH3 1.0.0' \
+            --notes 'Forza Horizon 3 on Azimuth with FH3 Mod Platform. Extract the ZIP beside azimuth.exe.'
