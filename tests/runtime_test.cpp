@@ -32,8 +32,8 @@ struct MockData {
     alignas(16) byte data[0x100]{};
     alignas(16) byte batch[MODEL_BATCH_SIZE]{};
     alignas(16) byte instances[0x40]{};
-    MockData(const char* lib,const char* name) {
-        new(data) std::string(lib);new(data+0x20) std::string("");
+    MockData(const char* lib,const char* name,const char* events="") {
+        new(data) std::string(lib);new(data+0x20) std::string(events);
         new(batch+0x48) std::string(name);
         *reinterpret_cast<GameVector*>(data+0xA0)={batch,batch+sizeof batch,batch+sizeof batch};
         *reinterpret_cast<GameVector*>(batch)={instances,instances+sizeof instances,instances+sizeof instances};
@@ -167,8 +167,20 @@ void collision_safety() {
     name="autoterrain_x-7161_z6138_square24.phys";
     assert(cap_query(91,bench_top)==1);
     forget_points(provider);
+
+    add_points(provider,{{30,0,0,-0.9f,1,0,true,wb::Kind::Railing,0,false,0,{},1}});
+    name=canal_rail_colliders[0];
+    assert(cap_query(98,side)==0);
+    assert(cap_query(98,offset)==1 && cap_query(98,ground)==1 && cap_query(19,side)==1);
+    name=canal_rail_colliders[1];
+    assert(cap_query(98,side)==1);
+    name="infr_global_bridge_02_var_i_square0.phys";
+    assert(cap_query(98,side)==1 && cap_query(98,ground)==1);
+    name="Regrouped_5_square4693.procphys";
+    assert(cap_query(65,side)==1);
+    forget_points(provider);
     name.~basic_string();
-    puts("Stock structures, raised surfaces, unrelated scenery, and barriers above a drop retain collision");
+    puts("Shallow canal railing collision is scoped to its exact mesh and footprint");
 }
 }
 
@@ -217,6 +229,41 @@ int main() {
         inject(trees.data);
     }
     puts("Live settings and overlapping streamed collision-point lifetimes passed");
+    {
+        MockData free_roam("AUSTRALIA_TREES","TREE_Coast_Maple_01_3D","0");
+        MockData free_roam_with_exclusion("AUSTRALIA_TREES","TREE_Coast_Maple_01_3D","~1171;0");
+        MockData event_tree("AUSTRALIA_TREES","TREE_Coast_Maple_01_3D","1442");
+        MockData event_tree_with_zero("AUSTRALIA_TREES","TREE_Coast_Maple_01_3D","0;1442");
+        MockData event_barrier("AUSTRALIA_BARRIERS","BARR_Armco_01_4m_3D","0");
+        inject(free_roam.data);
+        inject(free_roam_with_exclusion.data);
+        inject(event_tree.data);
+        inject(event_tree_with_zero.data);
+        inject(event_barrier.data);
+        assert(free_roam.groups()->count(sizeof(Group))==1);
+        const auto& group=*reinterpret_cast<const Group*>(free_roam.groups()->first);
+        assert(group.definition>=CLUTTER_FIRST && group.start==0 && group.count==2);
+        assert(g_provider_points.count(free_roam.data)==1);
+        assert(free_roam_with_exclusion.groups()->count(sizeof(Group))==1 &&
+               g_provider_points.count(free_roam_with_exclusion.data)==1);
+        assert(event_tree.groups()->count(sizeof(Group))==0 && !g_provider_points.count(event_tree.data));
+        assert(event_tree_with_zero.groups()->count(sizeof(Group))==0 && !g_provider_points.count(event_tree_with_zero.data));
+        assert(event_barrier.groups()->count(sizeof(Group))==0 && !g_provider_points.count(event_barrier.data));
+    }
+    puts("Free-roam route trees use native break groups with event barriers protected");
+    {
+        MockData canal("AUSTRALIA_BARRIERS","BARR_Surfers_05_Wall_A_3D");
+        auto coordinates=reinterpret_cast<float*>(canal.instances);
+        coordinates[0]=6161.432f;coordinates[1]=101.202f;coordinates[2]=4252.460f;
+        inject(canal.data);
+        assert(canal.groups()->count(sizeof(Group))==1);
+        const auto& group=*reinterpret_cast<const Group*>(canal.groups()->first);
+        assert(group.start==0 && group.count==1);
+        const auto& points=g_provider_points.at(canal.data);
+        assert(points.size()==1 && g_points[points[0]].canal_collision==3 &&
+               g_points[points[0]].ground.load()==3);
+    }
+    puts("Only audited shallow bridge placements convert the canal railing model");
     MockData early_armco("AUSTRALIA_BARRIERS","BARR_Armco_01_4m_3D");inject(early_armco.data);
     MockData early_pole("PROPS","PYLN_Electricity_Pole_01");inject(early_pole.data);
     assert(early_pole.groups()->count(sizeof(Group))==0);

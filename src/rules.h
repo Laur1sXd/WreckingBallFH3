@@ -20,11 +20,12 @@ inline std::string_view trim(std::string_view value) {
     while(!value.empty() && (value.back()==' ' || value.back()=='\t')) value.remove_suffix(1);
     return value;
 }
-inline bool list_match(std::string_view list,std::string_view value) {
+inline bool list_match(std::string_view list,std::string_view value,std::string_view ignored={}) {
     const auto name=lower(value);
     while(!list.empty()) {
         auto comma=list.find(',');auto token=trim(list.substr(0,comma));
-        if(token=="*" || (!token.empty() && name.find(lower(token))!=std::string::npos)) return true;
+        auto normalized=lower(token);
+        if(token=="*" || (!token.empty() && normalized!=ignored && name.find(normalized)!=std::string::npos)) return true;
         if(comma==std::string_view::npos) break;
         list.remove_prefix(comma+1);
     }
@@ -70,6 +71,10 @@ inline bool is_solid_bench(std::string_view name) {
     const auto model=lower(name);
     return model=="prop_surfers_bench_02" || model=="prop_surfers_bench_02_3d";
 }
+inline bool is_canal_railing_model(std::string_view name) {
+    const auto model=lower(name);
+    return model=="barr_surfers_05_wall_a_3d" || model=="barr_surfers_05_post_a_3d";
+}
 inline Kind classify(std::string_view name,std::string_view library) {
     if(is_utility_pole(name)) return Kind::Pole;
     if(list_match("bushes,crops",library) || list_match("Bush_,Crop_,Crops_,Hedge_,VINEYARD_",name)) return Kind::Other;
@@ -78,7 +83,7 @@ inline Kind classify(std::string_view name,std::string_view library) {
     if(list_match("bollard",name)) return Kind::Bollard;
     if(list_match("barr_armco_,barr_plains_armco_,guardrail",name)) return Kind::Guardrail;
     if(list_match("fenc,barrier",name)) return Kind::Fence;
-    if(list_match("railing,barr_rail,scooter_rail",name)) return Kind::Railing;
+    if(list_match("railing,barr_rail,scooter_rail",name) || is_canal_railing_model(name)) return Kind::Railing;
     if(list_match("sign_,billboard,sandwichboard,rewardboard",name)) return Kind::Sign;
     if(list_match("bin_,bins_,trash",name)) return Kind::Bin;
     if(list_match("bench,chair,table,parasol,umbrella,planter",name)) return Kind::Furniture;
@@ -111,7 +116,8 @@ inline bool selected(Kind kind,std::string_view name,std::string_view library,bo
     if(list_match(rules.skip_models,name) || list_match(rules.exclude_libraries,library) || (event && rules.skip_events)) return false;
     if(kind==Kind::Tree) return prefix_match(rules.prefix,name);
     if(kind==Kind::Furniture) return is_solid_bench(name);
-    if(list_match(rules.barrier_exclude,name)) return false;
+    // Surfers' white metal railing panel is named Wall_A in the asset list.
+    if(list_match(rules.barrier_exclude,name,is_canal_railing_model(name)?"wall":"")) return false;
     return is_barrier(kind);
 }
 struct Slowdown {

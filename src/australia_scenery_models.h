@@ -28,6 +28,8 @@ inline constexpr SceneryModel australia_scenery_models[] = {
     {"barr_surfers_02_railing_a",42646},
     {"barr_surfers_02_railing_b",42648},
     {"barr_surfers_02_railing_c",42650},
+    {"barr_surfers_05_post_a",42690},
+    {"barr_surfers_05_wall_a",42694},
     {"bush_coast_colouredleaf_01",43623},
     {"bush_coast_colouredleaf_02",43624},
     {"bush_coast_gorbush_01",43625},

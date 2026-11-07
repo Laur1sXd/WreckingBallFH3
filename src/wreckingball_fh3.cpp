@@ -8,6 +8,7 @@
 #include "placed_catalog.h"
 #include "native_clutter_catalog.h"
 #include "rules.h"
+#include "shallow_bridge_rails.h"
 #ifdef WB_MOD_PLATFORM
 #include "fh3mod.h"
 #else
@@ -652,11 +653,13 @@ struct Point {
     uint32_t break_definition;
     std::atomic<bool> broken;
     std::array<float,9> local_axes;
+    unsigned char canal_collision;
 };
 struct PendingPoint {
     float x,y,z,radius,dx,dz; bool ground; wb::Kind kind; float tree_scale{}; bool palm{};
     uint32_t break_definition{};
     std::array<float,9> local_axes{};
+    unsigned char canal_collision{};
 };
 Point* g_points{};
 std::array<std::atomic<int32_t>,BUCKETS> g_heads;
@@ -671,13 +674,14 @@ void add_points(byte* data,const std::vector<PendingPoint>& points) {
     auto& references=g_provider_points[data];
     references.reserve(references.size()+points.size());
     for (const auto& point:points) {
-        const auto [x,y,z,radius,dx,dz,ground,kind,tree_scale,palm,break_definition,local_axes]=point;
+        const auto [x,y,z,radius,dx,dz,ground,kind,tree_scale,palm,break_definition,local_axes,canal_collision]=point;
         if (!std::isfinite(x+y+z+radius) || std::fabs(x)>100000 || std::fabs(z)>100000) continue;
         const auto h=bucket(cell(x),cell(z));
         int index=g_heads[h].load(std::memory_order_relaxed);
         for (;index>=0;index=g_points[index].next) {
             const auto& p=g_points[index];
             if (p.kind==kind && p.palm==palm && p.break_definition==break_definition &&
+                p.canal_collision==canal_collision &&
                 std::fabs(p.x-x)<0.08f && std::fabs(p.z-z)<0.08f && std::fabs(p.y-y)<1) break;
         }
         if (index<0) {
@@ -688,6 +692,7 @@ void add_points(byte* data,const std::vector<PendingPoint>& points) {
             p.palm=palm;
             p.break_definition=break_definition;
             p.local_axes=local_axes;
+            p.canal_collision=canal_collision;
             p.next=g_heads[h].load(std::memory_order_relaxed);
             g_point_count.store(index+1,std::memory_order_relaxed);
             g_heads[h].store(index,std::memory_order_release);
@@ -729,12 +734,15 @@ std::atomic<bool> g_probe_requested{};
 std::mutex g_seen_mutex;
 std::unordered_set<std::string> g_seen;
 
-bool event_only(const char* s) {
+bool event_only(const char* s,bool zero_is_free_roam=false) {
     if (!s) return true;
-    for (;*s;) {
-        while (*s==' ' || *s==';') ++s;
-        if (*s && *s!='~') return true;
-        while (*s && *s!=';') ++s;
+    std::string_view tags(s);
+    while (!tags.empty()) {
+        const auto separator=tags.find(';');
+        const auto tag=wb::trim(tags.substr(0,separator));
+        if (!tag.empty() && tag.front()!='~' && !(zero_is_free_roam && tag=="0")) return true;
+        if (separator==std::string_view::npos) break;
+        tags.remove_prefix(separator+1);
     }
     return false;
 }
@@ -754,16 +762,27 @@ int original_model(const std::string& name) {
     auto found=std::lower_bound(first,last,name,[](const SceneryModel& a,const std::string& b){return a.name<b;});
     return found!=last && name==found->name?found->index:-1;
 }
+const ShallowBridgeRail* shallow_bridge_rail(int model,float x,float y,float z) {
+    constexpr float tolerance=0.09f;
+    const auto end=std::end(shallow_bridge_rails);
+    auto rail=std::lower_bound(std::begin(shallow_bridge_rails),end,x-tolerance,
+                               [](const ShallowBridgeRail& item,float minimum){return item.x<minimum;});
+    for (;rail!=end && rail->x<=x+tolerance;++rail) {
+        if (rail->model==model && std::fabs(rail->y-y)<=tolerance && std::fabs(rail->z-z)<=tolerance) return rail;
+    }
+    return nullptr;
+}
 const char* stock_barrier_donor(const std::string& name) {
     // Australia PGEO records show these families without a native group.
     // Use four-metre donors for Armco spans and single posts for the uprights.
     if (name=="barr_armco_wooden_fence_4m") return "barr_fence_wooden_03_4m";
     if (name=="barr_armco_wooden_post") return "barr_fence_pickett_01_post";
     if (name=="barr_armco_01_4m" || name=="barr_plains_armco_straight_01" ||
-        name=="barr_plains_armco_left_01" || name=="barr_plains_armco_right_01") return "barr_fence_metalmesh_02_4m";
+        name=="barr_plains_armco_left_01" || name=="barr_plains_armco_right_01" ||
+        name=="barr_surfers_05_wall_a") return "barr_fence_metalmesh_02_4m";
     if (name=="barr_armco_01_post_left" || name=="barr_armco_01_post_right" ||
         name=="barr_metal_railing_01_post" || name=="barr_metal_railing_01_endpost" ||
-        name=="barr_metal_railing_02_post") return "barr_fence_metalmesh_01_post";
+        name=="barr_metal_railing_02_post" || name=="barr_surfers_05_post_a") return "barr_fence_metalmesh_01_post";
     if (name=="barr_plains_bollard_01_var_a") return "barr_plains_bollard_01";
     return nullptr;
 }
@@ -784,16 +803,21 @@ void inject(byte* data) {
     }
     const char* lib=string_at(data);
     if (!lib) return;
+    const char* events=string_at(data+0x20);
     auto groups=reinterpret_cast<GameVector*>(data+0x60);
     auto models=reinterpret_cast<GameVector*>(data+0xA0);
     size_t old=groups->count(sizeof(Group)),count=models->count(MODEL_BATCH_SIZE);
     if (old>8192 || count>4096 || !count || !readable(models->first,count*MODEL_BATCH_SIZE)) return;
     {
         std::lock_guard<std::mutex> lock(g_seen_mutex);
-        if (g_debug && g_seen.insert(lib).second) log("procedural %s: %zu groups, %zu model batches; events '%s'",lib,old,count,string_at(data+0x20)?string_at(data+0x20):"<invalid>");
+        if (g_debug && g_seen.insert(lib).second) log("procedural %s: %zu groups, %zu model batches; events '%s'",lib,old,count,events?events:"<invalid>");
     }
-    const bool for_event=event_only(string_at(data+0x20));
-    if ((for_event && rules.skip_events) || wb::list_match(rules.exclude_libraries,lib)) return;
+    const bool for_event=event_only(events);
+    // FH3 mainland tree routes use "0" for free roam, sometimes alongside
+    // exclusions such as "~1171". Other scenery keeps the event filter.
+    const bool tree_for_event=for_event && (std::string_view(lib)!="AUSTRALIA_TREES" || event_only(events,true));
+    if ((tree_for_event && rules.skip_events) ||
+        wb::list_match(rules.exclude_libraries,lib)) return;
     std::vector<std::vector<wb::Range>> covered(count);
     if (old && !readable(groups->first,old*sizeof(Group))) return;
     for (size_t i=0;i<old;++i) {
@@ -816,11 +840,12 @@ void inject(byte* data) {
         auto holes=wb::uncovered_ranges(static_cast<int>(n),covered[i]);
         if (holes.empty()) continue;
         const auto kind=wb::classify(name,lib);
-        if (!wb::selected(kind,name,lib,for_event,rules)) continue;
         const bool tree=kind==wb::Kind::Tree;
+        if (!wb::selected(kind,name,lib,tree?tree_for_event:for_event,rules)) continue;
         const bool bench=kind==wb::Kind::Furniture;
         const bool chain=wb::is_barrier(kind) && kind!=wb::Kind::Bollard && !contains(name,"post");
         const auto source=stem(name);
+        const bool canal_railing=source=="barr_surfers_05_wall_a" || source=="barr_surfers_05_post_a";
         const bool palm=tree && contains(name,"palm");
         const bool large_palm=tree && source=="tree_global_palm_01";
         auto donor=source;
@@ -873,6 +898,9 @@ void inject(byte* data) {
         for (size_t k=0;k<n;++k) {
             if (!add_instance[k]) continue;
             auto& t=transforms[k];
+            const auto* bridge=(kind==wb::Kind::Railing || kind==wb::Kind::Guardrail)?
+                shallow_bridge_rail(model_index,t.x,t.y,t.z):nullptr;
+            if (canal_railing && (!bridge || std::fabs(t.scale-1)>0.025f)) continue;
             // All audited Bench 02 placements use unit scale. The loose
             // body is sized for that mesh, so skip non-stock scaled copies.
             if (bench && !(std::fabs(t.scale-1)<0.025f)) continue;
@@ -890,6 +918,12 @@ void inject(byte* data) {
             if (definition_state && !resolve_definition(definition_state->table,def,&native)) continue;
             if (!additions.empty() && additions.back().definition==int(def) && additions.back().model==int(i) && additions.back().start+additions.back().count==int(k)) ++additions.back().count;
             else additions.push_back({int(def),int(i),int(k),1,-1,0,0});
+            if (canal_railing) {
+                const auto collision=chain?bridge->collision:static_cast<unsigned char>(0);
+                points.push_back({t.x,t.y,t.z,-g_barrier_radius,std::cos(t.yaw),std::sin(t.yaw),
+                                  true,kind,0,false,0,{},collision});
+                continue;
+            }
             if (!chain) {
                 if (bench) {
                     points.push_back({t.x,t.y,t.z,2.0f,1,0,true,kind,0,false,def,bench_axes[k]});
@@ -905,7 +939,7 @@ void inject(byte* data) {
                 if (d>0.01f && d<nearest) { nearest=d;float l=std::sqrt(x*x+z*z);if(l>0.001f){dx=x/l;dz=z/l;} }
             }
             if (nearest<1e8f) length=std::clamp(std::sqrt(nearest),0.5f,8.0f);
-            for (float s=-length*0.5f;s<=length;s+=0.8f) points.push_back({t.x+dx*s,t.y,t.z+dz*s,-g_barrier_radius,dx,dz,!g_ground_check,kind});
+            for (float s=-length*0.5f;s<=length;s+=0.8f) points.push_back({t.x+dx*s,t.y,t.z+dz*s,-g_barrier_radius,dx,dz,bridge || !g_ground_check,kind});
         }
         if (g_debug) log("inject %s: %zu instances, virtual %04X, %zu collision points",name,n,id,points.size()-point_start);
         if (exact || id>=CLUTTER_FIRST) g_clutter_instances.fetch_add(points.size()-point_start,std::memory_order_relaxed);
@@ -1010,9 +1044,9 @@ void ground_probe(Point* p,byte** triangles,byte** vertices,int n) {
         }
     }
 }
-enum class CollisionMesh { Protected, Terrain, Procedural, ProceduralProps };
+enum class CollisionMesh { Protected, Terrain, CanalRail, Procedural, ProceduralProps };
 
-CollisionMesh collision_mesh(const byte* mesh) {
+CollisionMesh collision_mesh(const byte* mesh,unsigned char& canal_collision) {
     // The scratch-free query callers pass the mesh at +D8 of the template.
     // Both archive readers deserialize its resource name into the string at +0.
     const auto& name=*reinterpret_cast<const MsvcString*>(mesh-0xD8);
@@ -1027,6 +1061,14 @@ CollisionMesh collision_mesh(const byte* mesh) {
         return file.size()>=value.size() && _strnicmp(file.data()+file.size()-value.size(),value.data(),value.size())==0;
     };
     if (prefix("autoterrain_") && suffix(".phys")) return CollisionMesh::Terrain;
+    if (file.size()==49 && file[8]=='-' && suffix(".phys")) {
+        for (unsigned char i=0;i<std::size(canal_rail_colliders);++i) {
+            if (file==canal_rail_colliders[i]) {
+                canal_collision=i+1;
+                return CollisionMesh::CanalRail;
+            }
+        }
+    }
     // Bench 02 appears in the mainland props layer and in these three
     // route-conditioned variants. The same footprint and materials apply.
     if (suffix(".procphys") && (prefix("Regrouped_11_square") ||
@@ -1104,9 +1146,19 @@ bool matches_bench(const Point& p,byte surface,const float* a,const float* b,con
     return surface==19 && (faces&15) && high[1]-low[1]>0.28f;
 }
 
+bool matches_canal_rail(const Point& p,const float* a,const float* b,const float* c) {
+    for (const auto v:{a,b,c}) {
+        const float x=v[0]-p.x,y=v[1]-p.y,z=v[2]-p.z;
+        const float along=x*p.dx+z*p.dz, across=x*p.dz-z*p.dx;
+        if (!(along>=-0.25f && along<=4.2f && std::fabs(across)<=0.26f && y>=-0.10f && y<=2.0f))
+            return false;
+    }
+    return true;
+}
 constexpr int MAX_FILTER_TRIANGLES=1024;
 bool classify_triangles(const byte* mesh,const float* box,int n,byte** triangles,byte** vertices,bool* discard) {
-    const auto source=collision_mesh(mesh);
+    unsigned char canal_collision=0;
+    const auto source=collision_mesh(mesh,canal_collision);
     if (source==CollisionMesh::Protected || (source==CollisionMesh::Terrain && !g_ground_check)) return false;
     const float margin=source==CollisionMesh::Terrain?3.0f:4.5f;
     Point* candidates[256];
@@ -1117,6 +1169,20 @@ bool classify_triangles(const byte* mesh,const float* box,int n,byte** triangles
     if (source==CollisionMesh::Terrain) {
         for (int i=0;i<nc;++i) if (candidates[i]->radius<0) ground_probe(candidates[i],triangles,vertices,n);
         return false;
+    }
+    if (source==CollisionMesh::CanalRail) {
+        bool changed=false;
+        for (int k=0;k<n;++k) {
+            if (triangles[k][1]!=98) continue;
+            const float *a,*b,*c; triangle(triangles[k],vertices[k],a,b,c);
+            for (int i=0;i<nc;++i) {
+                const auto p=candidates[i];
+                if (p->canal_collision!=canal_collision || !matches_canal_rail(*p,a,b,c)) continue;
+                discard[k]=changed=true;
+                break;
+            }
+        }
+        return changed;
     }
     Point* standing_palms[256];
     int palm_count=0;
@@ -1145,6 +1211,7 @@ bool classify_triangles(const byte* mesh,const float* box,int n,byte** triangles
         if (standing_trunk) continue;
         for (int i=0;i<nc-palm_count;++i) {
             const auto& p=*candidates[i];
+            if (p.canal_collision) continue;
             if (p.kind==wb::Kind::Furniture) {
                 if (!bench_surface || !matches_bench(p,surface,a,b,c)) continue;
             } else if (!matches_surface(p.kind,surface) || !matches_prop(p,a,b,c,x,z,vertical)) continue;
