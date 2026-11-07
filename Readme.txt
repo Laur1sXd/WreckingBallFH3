@@ -52,6 +52,11 @@ collider sized to the trunk. Their matched stock trunk faces, including
 the caps, clear when the native break runs. Buildings, terrain, roads,
 floors and collision with ambiguous ownership keep their stock collision.
 
+Railings also covers the audited white panels and posts over shallow
+water at the two Surfers Paradise crossings. The Guardrails switch
+covers the audited Armco sections at a third mainland bridge. The
+bridge decks keep their stock collision.
+
 F8 logs nearby scenery to fh3-mods\WreckingBall.log. Set Debug=1 for a
 more detailed log.
 

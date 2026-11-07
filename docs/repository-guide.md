@@ -6,12 +6,12 @@
 | --- | --- |
 | [`.gitattributes`](../.gitattributes) | Sets consistent line endings for text, Windows batch files, and workflows. |
 | [`.gitignore`](../.gitignore) | Keeps local builds, IDE files, and logs out of Git. |
-| [`.github/workflows/build.yml`](../.github/workflows/build.yml) | Builds and tests the Windows x64 DLL, packages the download, and publishes the initial release. |
+| [`.github/workflows/build.yml`](../.github/workflows/build.yml) | Builds and tests the Windows x64 DLL, creates the install and source archives, and publishes the release assets. |
 | [`build.cmd`](../build.cmd) | Locates MSVC and builds the Mod Platform and legacy ExtraOptions DLLs. Pass `test` to run the regression suite. |
 | [`WreckingBall.ini`](../WreckingBall.ini) | Sets and documents the default scenery switches, impact slowdown, and debris cleanup. |
 | [`README.md`](../README.md) | Explains what the mod does, how to install it, and how to build it. |
 | [`Readme.txt`](../Readme.txt) | Ships in the download with install, migration, and gameplay details. |
-| [`RELEASE_NOTES.md`](../RELEASE_NOTES.md) | Records the installation and compatibility notes for v1.0.0. |
+| [`RELEASE_NOTES.md`](../RELEASE_NOTES.md) | Records the installation and compatibility notes for v1.0.0 and its November update. |
 | [`CREDITS.md`](../CREDITS.md) | Credits the upstream mod, platform SDK, and dependencies. |
 | [`LICENSE`](../LICENSE) | Contains the GNU GPL v3 license text. |
 | [`docs/repository-guide.md`](repository-guide.md) | Explains the role of every tracked file. |
@@ -25,6 +25,7 @@
 | [`rules.h`](../src/rules.h) | Defines scenery selection, category switches, and impact slowdown calculations. |
 | [`coverage.h`](../src/coverage.h) | Finds placements the mod can add to partial batches while preserving stock breakable groups. |
 | [`australia_scenery_models.h`](../src/australia_scenery_models.h) | Maps recognized mainland model names to FH3 asset indices. |
+| [`shallow_bridge_rails.h`](../src/shallow_bridge_rails.h) | Lists the audited railing, post, and guardrail placements over shallow water and identifies their collision meshes. |
 | [`native_clutter_catalog.h`](../src/native_clutter_catalog.h) | Lists stock physics definition names used to resolve supported scenery at runtime. |
 | [`placed_catalog.h`](../src/placed_catalog.h) | Labels mainland model IDs for the F8 scenery diagnostic. |
 | [`fh3mod.h`](../src/fh3mod.h) | Provides the FH3 Mod Platform SDK interface. |
@@ -37,7 +38,7 @@
 | --- | --- |
 | [`rules_test.cpp`](../tests/rules_test.cpp) | Checks scenery classification, exclusions, and slowdown calculations. |
 | [`coverage_test.cpp`](../tests/coverage_test.cpp) | Checks gap detection for partial stock breakable groups. |
-| [`runtime_test.cpp`](../tests/runtime_test.cpp) | Checks collision protection, debris binding and cleanup, bench inertia, and runtime settings with game data mocks. |
+| [`runtime_test.cpp`](../tests/runtime_test.cpp) | Uses game data mocks to check tree routes, shallow bridge railings, collision protection, debris, bench inertia, and runtime settings. |
 | [`platform_settings_test.cpp`](../tests/platform_settings_test.cpp) | Checks preview navigation, A and Back behavior, and INI persistence. |
 | [`platform_smoke.cpp`](../tests/platform_smoke.cpp) | Tests real loader integration in a fixture that maps the supported FH3 executable without starting the game. |
 
