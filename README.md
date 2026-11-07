@@ -51,7 +51,7 @@ Close FH3 and Azimuth, then remove `fh3-mods\WreckingBall.dll`. Remove `Wrecking
 
 The mod adds breakable physics only to eligible placements that FH3 treats as solid. Scenery FH3 already breaks, including bushes, crops, and breakable utility poles, keeps its stock behavior. Buildings, roads, terrain, and collision the mod cannot confidently match to a supported object stay solid.
 
-The **Railings** and **Guardrails** switches also cover audited sections at three mainland bridges where the car can land in shallow water. This includes the white panels and posts at two Surfers Paradise crossings.
+The **Railings** and **Guardrails** switches also cover audited sections at three mainland bridges where the car can land in shallow water.
 
 Tree debris depends on which meshes FH3 has loaded in the area. The mod prefers pieces from the same tree family and can use other loaded wood fragments as a fallback. A converted object can clear without visible debris when the required mesh is unavailable. Benches and some barriers use their original model as one loose piece.
 
