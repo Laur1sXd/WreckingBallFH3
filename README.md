@@ -4,10 +4,6 @@ WreckingBall lets you crash through scenery that normally stops your car in main
 
 Converted trees can drop trunks and branches using FH3's own fracture pieces. Solid wood-topped benches leave their original model as a loose piece. Where matching debris is available, it can land on the ground and fade after a configurable time or distance. Bigger trees take more speed off the car, and you can adjust how much.
 
-## Download
-
-[**Download WreckingBall FH3 1.0.0**](https://github.com/Laur1sXd/WreckingBallFH3/releases/tag/v1.0.0)
-
 Requires the Xbox One build of **Forza Horizon 3 (1.0.125.0)** running on **Azimuth** with **FH3 Mod Platform** installed.
 
 ## Settings
